@@ -1,6 +1,6 @@
-# Personal Herdr tools
 
-This repository contains Charlie's personal Herdr plugin and pane history command.
+
+My personal Herdr plugins and pane history command
 
 ## Tools and files
 
