@@ -1,0 +1,44 @@
+id = "local.layouts"
+name = "Arrange"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+description = "Arrange existing panes quickly without restarting their processes."
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "layouts"
+title = "Arrange"
+contexts = ["workspace"]
+command = ["./target/release/herdr-layouts", "open"]
+
+[[actions]]
+id = "expand"
+title = "Expand Focused Pane"
+contexts = ["workspace"]
+command = ["./target/release/herdr-layouts", "expand"]
+
+[[actions]]
+id = "balance"
+title = "Balance Split"
+contexts = ["workspace"]
+command = ["./target/release/herdr-layouts", "balance"]
+
+[[actions]]
+id = "rotate"
+title = "Rotate Split"
+contexts = ["workspace"]
+command = ["./target/release/herdr-layouts", "rotate"]
+
+[[actions]]
+id = "undo"
+title = "Undo Layout"
+contexts = ["workspace"]
+command = ["./target/release/herdr-layouts", "undo"]
+
+[[panes]]
+id = "picker"
+title = "\u200B"
+placement = "popup"
+width = 64
+height = 20
+command = ["./target/release/herdr-layouts", "picker"]
