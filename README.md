@@ -17,8 +17,6 @@ My personal Herdr plugins and pane history command
 
 ## Origins
 
-Both tools were written for this repository rather than copied from another Herdr plugin.
-
 - [`pane-history.mjs`](pane-history.mjs) was built around Herdr's command line interface and agent session support.
 - [`layouts`](layouts/README.md) was built against Herdr's [plugin system](https://github.com/cx18121/herdr/blob/master/docs/next/website/src/content/docs/plugins.mdx) and [socket layout API](https://github.com/cx18121/herdr/blob/master/docs/next/website/src/content/docs/socket-api.mdx).
 
