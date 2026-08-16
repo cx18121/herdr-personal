@@ -42,5 +42,5 @@ The Actions tab contains Rearrange, Expand, Balance, Rotate, and Undo. The Layou
 cargo test
 cargo clippy --all-targets -- -D warnings
 cargo build --release
-herdr plugin link ~/.config/herdr/plugins/local/layouts
+herdr plugin link "$PWD"
 ```
