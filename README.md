@@ -5,6 +5,7 @@ My personal Herdr plugins and pane history command
 ## Tools and files
 
 - [`pane-history.mjs`](pane-history.mjs) adds close and reopen behavior for panes. It remembers the pane directory and tab, and it restores the previous Pi session when one is available.
+- [`herdr-update`](herdr-update) backs the `herdr update` command. It syncs my fork, builds it, moves running panes and agents to the new build, and then rebuilds the matching binary on the personal cloud host.
 - [`layouts/herdr-plugin.toml`](layouts/herdr-plugin.toml) registers the Arrange actions, shortcuts, and popup picker with Herdr.
 - [`layouts/src/main.rs`](layouts/src/main.rs) reads the requested Arrange action and runs it against the active Herdr pane.
 - [`layouts/src/herdr.rs`](layouts/src/herdr.rs) sends commands to the Herdr server and converts its layout responses into local Rust types.
@@ -27,6 +28,18 @@ cd ~/Projects/personal/herdr-personal/layouts
 cargo build --release
 herdr plugin link "$PWD"
 ```
+
+## Install the update command
+
+Herdr runs `herdr update` from `~/.local/libexec`, so link it there:
+
+```bash
+ln -s ~/Projects/personal/herdr-personal/herdr-update ~/.local/libexec/herdr-update
+```
+
+Building requires Zig 0.15.2 alongside the Rust toolchain.
+
+The last step calls `sync-herdr.sh` in the `personal-cloud` repository, because a Herdr client and server must speak the same wire protocol and no published release matches this fork. It is skipped when that repository is absent. A remote failure never fails the local update, and `HERDR_UPDATE_SKIP_REMOTE=1` turns the step off.
 
 ## Configure pane history
 

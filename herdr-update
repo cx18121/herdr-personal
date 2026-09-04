@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if (( $# != 0 )); then
+    printf 'Usage: herdr update\n' >&2
+    exit 2
+fi
+
+source_repo="$HOME/Projects/personal/herdr"
+root="$HOME/.local/share/herdr-custom"
+worktree="$root/build-worktree"
+target_dir="$root/build-target"
+releases_dir="$root/releases"
+current_link="$root/current"
+lock_dir="$root/update.lock"
+
+mkdir -p "$root" "$releases_dir"
+if ! mkdir "$lock_dir" 2>/dev/null; then
+    printf 'Another Herdr update is already running.\n' >&2
+    exit 1
+fi
+
+cleanup() {
+    git -C "$source_repo" worktree remove --force "$worktree" >/dev/null 2>&1 || true
+    git -C "$source_repo" worktree prune >/dev/null 2>&1 || true
+    rmdir "$lock_dir" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+if [[ ! -d "$source_repo/.git" ]]; then
+    printf 'Herdr source was not found at %s.\n' "$source_repo" >&2
+    exit 1
+fi
+if [[ -n "$(git -C "$source_repo" status --porcelain)" ]]; then
+    printf 'The Herdr source checkout has uncommitted changes. Commit or discard them first.\n' >&2
+    exit 1
+fi
+if [[ "$(git -C "$source_repo" branch --show-current)" != "master" ]]; then
+    printf 'The Herdr source checkout must be on your master branch.\n' >&2
+    exit 1
+fi
+
+if ! command -v gh >/dev/null; then
+    printf 'GitHub CLI is required to sync your Herdr fork.\n' >&2
+    exit 1
+fi
+
+printf 'Syncing your GitHub fork...\n'
+git -C "$source_repo" push origin master
+if ! gh api --method POST repos/cx18121/herdr/merge-upstream -f branch=master >/dev/null; then
+    printf 'GitHub could not sync your fork. The running version was not changed.\n' >&2
+    exit 1
+fi
+
+git -C "$source_repo" fetch origin master
+git -C "$source_repo" merge --ff-only origin/master
+
+source_commit="$(git -C "$source_repo" rev-parse master)"
+active_target="$(readlink "$current_link" 2>/dev/null || true)"
+if [[ "$active_target" == "$releases_dir/$source_commit/herdr" ]]; then
+    printf 'Herdr is already up to date.\n'
+    exit 0
+fi
+
+git -C "$source_repo" worktree remove --force "$worktree" >/dev/null 2>&1 || true
+git -C "$source_repo" worktree prune >/dev/null 2>&1 || true
+git -C "$source_repo" worktree add --detach "$worktree" master >/dev/null
+
+zig="${ZIG:-}"
+if [[ -z "$zig" && -x /opt/homebrew/opt/zig@0.15/bin/zig ]]; then
+    zig=/opt/homebrew/opt/zig@0.15/bin/zig
+fi
+if [[ -z "$zig" ]]; then
+    zig="$(command -v zig || true)"
+fi
+if [[ -z "$zig" ]]; then
+    printf 'Zig 0.15.2 is required to build Herdr.\n' >&2
+    exit 1
+fi
+
+export ZIG="$zig"
+export CARGO_TARGET_DIR="$target_dir"
+
+printf 'Building Herdr...\n'
+(
+    cd "$worktree"
+    cargo build --release --locked --quiet
+)
+
+candidate_commit="$(git -C "$worktree" rev-parse HEAD)"
+candidate_dir="$releases_dir/$candidate_commit"
+candidate="$candidate_dir/herdr"
+mkdir -p "$candidate_dir"
+install -m 755 "$target_dir/release/herdr" "$candidate"
+
+if [[ "${HERDR_UPDATE_BUILD_ONLY:-0}" == "1" ]]; then
+    printf 'Candidate built at %s\n' "$candidate"
+    exit 0
+fi
+
+client_status="$($candidate status 2>&1 || true)"
+protocol="$(printf '%s\n' "$client_status" | awk '/^client:/{client=1; next} client && $1 == "protocol:" {print $2; exit}')"
+version="$($candidate --version | awk '{print $2}')"
+if [[ -z "$protocol" || -z "$version" ]]; then
+    printf 'Could not read the candidate Herdr version. The running version was not changed.\n' >&2
+    exit 1
+fi
+
+active="$current_link"
+active_status="$($active status 2>&1 || true)"
+if printf '%s\n' "$active_status" | grep -q '^  status: running$'; then
+    printf 'Moving running panes and agents to the new Herdr server...\n'
+    if ! "$active" server live-handoff \
+        --import-exe "$candidate" \
+        --expected-protocol "$protocol" \
+        --expected-version "$version"; then
+        printf 'Live handoff failed. The running Herdr server was not replaced.\n' >&2
+        exit 1
+    fi
+fi
+
+next_link="$root/current.next"
+ln -sfn "$candidate" "$next_link"
+mv -f "$next_link" "$current_link"
+printf 'Herdr is now updated to %s.\n' "$candidate_commit"
+
+# Keep the personal cloud host on the same commit. Its client and server must
+# speak the same wire protocol, and no published release matches this fork.
+# A remote failure never fails the update: the Mac is already updated.
+sync_remote="$HOME/Projects/personal/personal-cloud/scripts/sync-herdr.sh"
+if [[ -x "$sync_remote" && "${HERDR_UPDATE_SKIP_REMOTE:-0}" != "1" ]]; then
+    if ! "$sync_remote" "$candidate_commit"; then
+        printf 'Remote Herdr was not updated. Run %s when convenient.\n' "$sync_remote" >&2
+    fi
+fi
