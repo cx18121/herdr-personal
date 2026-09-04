@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+mode=${1:-open}
+herdr="$HOME/.local/bin/herdr"
+wt_dir="$HOME/.local/share/mise/installs/ubi-max-sixty-worktrunk/latest"
+if [[ ! -x "$wt_dir/wt" ]]; then
+  printf 'Worktrunk was not found at %s.\n' "$wt_dir/wt" >&2
+  exit 1
+fi
+plugin_path="$wt_dir:$PATH"
+
+cwd=$(
+  "$herdr" pane current |
+    jq -r '.result.pane.foreground_cwd // .result.pane.cwd'
+)
+repo=$(git -C "$cwd" rev-parse --show-toplevel)
+
+case "$mode" in
+  open)
+    entrypoint=picker-default
+    ;;
+  current)
+    entrypoint=picker-current
+    ;;
+  remove)
+    entrypoint=remover
+    ;;
+  *)
+    printf 'usage: %s {open|current|remove}\n' "$0" >&2
+    exit 2
+    ;;
+esac
+
+if [[ "$mode" != remove ]] && git -C "$repo" remote get-url origin >/dev/null 2>&1; then
+  fetch_state="$HOME/.local/state/herdr-worktrunk"
+  fetch_key=$(printf '%s' "$repo" | shasum -a 256 | cut -d' ' -f1)
+  fetch_stamp="$fetch_state/$fetch_key.stamp"
+  fetch_lock="$fetch_state/$fetch_key.lock"
+  mkdir -p "$fetch_state"
+
+  now=$(date +%s)
+  last_fetch=0
+  [[ -f "$fetch_stamp" ]] && last_fetch=$(stat -f %m "$fetch_stamp")
+  if (( now - last_fetch >= 300 )); then
+    (
+      if mkdir "$fetch_lock" 2>/dev/null; then
+        trap 'rmdir "$fetch_lock"' EXIT
+        if git -C "$repo" fetch --prune --quiet; then
+          touch "$fetch_stamp"
+        fi
+      fi
+    ) </dev/null >/dev/null 2>&1 &
+  fi
+fi
+
+exec "$herdr" plugin pane open \
+  --plugin worktrunk \
+  --entrypoint "$entrypoint" \
+  --placement popup \
+  --width 96 \
+  --height 20 \
+  --cwd "$repo" \
+  --env "PATH=$plugin_path" \
+  --focus
