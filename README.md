@@ -6,7 +6,7 @@ My personal Herdr plugins and pane history command
 
 - [`pane-history.mjs`](pane-history.mjs) adds close and reopen behavior for panes. It remembers the pane directory and tab, and it restores the previous Pi session when one is available.
 - [`herdr-update`](herdr-update) backs the `herdr update` command. It syncs my fork, builds it, moves running panes and agents to the new build, and then rebuilds the matching binary on the personal cloud host.
-- [`herdr-worktrunk-picker`](herdr-worktrunk-picker) opens the Worktrunk picker in a popup pane for the current pane's repository, and refreshes the repository in the background at most once every five minutes.
+- [`pi-herdr-worktree-jump`](pi-herdr-worktree-jump) moves an active Pi session into a Worktrunk-managed checkout while preserving the conversation.
 - [`layouts/herdr-plugin.toml`](layouts/herdr-plugin.toml) registers the Arrange actions, shortcuts, and popup picker with Herdr.
 - [`layouts/src/main.rs`](layouts/src/main.rs) reads the requested Arrange action and runs it against the active Herdr pane.
 - [`layouts/src/herdr.rs`](layouts/src/herdr.rs) sends commands to the Herdr server and converts its layout responses into local Rust types.
@@ -30,16 +30,19 @@ cargo build --release
 herdr plugin link "$PWD"
 ```
 
-## Install the commands
+## Install the command
 
-Both commands run from `~/.local/libexec`, so link them there:
+The update command runs from `~/.local/libexec`, so link it there:
 
 ```bash
 ln -s ~/Projects/personal/herdr-personal/herdr-update ~/.local/libexec/herdr-update
-ln -s ~/Projects/personal/herdr-personal/herdr-worktrunk-picker ~/.local/libexec/herdr-worktrunk-picker
 ```
 
-The picker is bound to `cmd+shift+o` and `cmd+shift+r` in `~/.config/herdr/config.toml` and needs `jq` plus Worktrunk installed through mise.
+Worktree creation and removal use the upstream `devashish2203/herdr-worktrunk` plugin. Pi session relocation uses the local package:
+
+```bash
+pi install ~/Projects/personal/herdr-personal/pi-herdr-worktree-jump
+```
 
 Building requires Zig 0.15.2 alongside the Rust toolchain.
 
