@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+backend="github:max-sixty/worktrunk"
+version=$(mise latest "$backend")
+mise install "$backend@$version"
+
+launcher="$HOME/.local/bin/wt"
+install -d "$(dirname "$launcher")"
+temporary=$(mktemp "${launcher}.XXXXXX")
+trap 'rm -f "$temporary"' EXIT
+cat > "$temporary" <<SCRIPT
+#!/usr/bin/env bash
+set -euo pipefail
+
+tool_dir=\$(mise where "$backend@$version")
+exec "\$tool_dir/wt" "\$@"
+SCRIPT
+chmod 0755 "$temporary"
+mv "$temporary" "$launcher"
+trap - EXIT
+
+"$launcher" --version

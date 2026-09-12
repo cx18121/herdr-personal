@@ -5,7 +5,7 @@ My personal Herdr plugins and pane history command
 ## Tools and files
 
 - [`pane-history.mjs`](pane-history.mjs) adds close and reopen behavior for panes. It remembers the pane directory and tab, and it restores the previous Pi session when one is available.
-- [`herdr-update`](herdr-update) backs the `herdr update` command. It syncs my fork, builds it, moves running panes and agents to the new build, and then rebuilds the matching binary on the personal cloud host.
+- [`install-worktrunk`](install-worktrunk) installs the current Worktrunk release through mise and owns the stable `~/.local/bin/wt` launcher.
 - [`pi-herdr-worktree-jump`](pi-herdr-worktree-jump) moves an active Pi session into a Worktrunk-managed checkout while preserving the conversation.
 - [`layouts/herdr-plugin.toml`](layouts/herdr-plugin.toml) registers the Arrange actions, shortcuts, and popup picker with Herdr.
 - [`layouts/src/main.rs`](layouts/src/main.rs) reads the requested Arrange action and runs it against the active Herdr pane.
@@ -20,7 +20,7 @@ My personal Herdr plugins and pane history command
 ## Origins
 
 - [`pane-history.mjs`](pane-history.mjs) was built around Herdr's command line interface and agent session support.
-- [`layouts`](layouts/README.md) was built against Herdr's [plugin system](https://github.com/cx18121/herdr/blob/master/docs/next/website/src/content/docs/plugins.mdx) and [socket layout API](https://github.com/cx18121/herdr/blob/master/docs/next/website/src/content/docs/socket-api.mdx).
+- [`layouts`](layouts/README.md) was built against Herdr's [plugin system](https://github.com/herdrdev/herdr/blob/master/docs/next/website/src/content/docs/plugins.mdx) and [socket layout API](https://github.com/herdrdev/herdr/blob/master/docs/next/website/src/content/docs/socket-api.mdx).
 
 ## Build and link Arrange
 
@@ -30,23 +30,19 @@ cargo build --release
 herdr plugin link "$PWD"
 ```
 
-## Install the command
+## Install the integrations
 
-The update command runs from `~/.local/libexec`, so link it there:
+Worktree creation and removal use the upstream `devashish2203/herdr-worktrunk` plugin. Install Worktrunk and its stable launcher with:
 
 ```bash
-ln -s ~/Projects/personal/herdr-personal/herdr-update ~/.local/libexec/herdr-update
+~/Projects/personal/herdr-personal/install-worktrunk
 ```
 
-Worktree creation and removal use the upstream `devashish2203/herdr-worktrunk` plugin. Pi session relocation uses the local package:
+Pi session relocation uses the local package:
 
 ```bash
 pi install ~/Projects/personal/herdr-personal/pi-herdr-worktree-jump
 ```
-
-Building requires Zig 0.15.2 alongside the Rust toolchain.
-
-The last step calls `sync-herdr.sh` in the `personal-cloud` repository, because a Herdr client and server must speak the same wire protocol and no published release matches this fork. It is skipped when that repository is absent. A remote failure never fails the local update, and `HERDR_UPDATE_SKIP_REMOTE=1` turns the step off.
 
 ## Configure pane history
 
