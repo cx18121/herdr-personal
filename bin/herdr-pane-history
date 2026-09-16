@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+script=${BASH_SOURCE[0]}
+while [[ -L "$script" ]]; do
+  directory=$(cd -P -- "$(dirname -- "$script")" && pwd)
+  target=$(readlink "$script")
+  if [[ "$target" == /* ]]; then
+    script=$target
+  else
+    script=$directory/$target
+  fi
+done
+root=$(cd -- "$(dirname -- "$script")/.." && pwd)
 exec "$HOME/.local/bin/mise" -C "$root" exec -- node "$root/pane-history.mjs" "$@"
