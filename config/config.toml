@@ -1,0 +1,105 @@
+onboarding = false
+
+[keys]
+detach = "prefix+q"
+new_workspace = ["prefix+shift+n", "cmd+n"]
+close_workspace = ["prefix+shift+d", "cmd+shift+w"]
+new_tab = ["prefix+c", "cmd+t"]
+previous_tab = ["prefix+p", "cmd+shift+["]
+next_tab = ["prefix+n", "cmd+shift+]"]
+switch_tab = ["prefix+1..9", "cmd+1..9"]
+close_tab = ["prefix+shift+x"]
+split_vertical = ["prefix+v", "cmd+d"]
+split_horizontal = ["prefix+minus", "cmd+shift+d"]
+close_pane = ["prefix+x"]
+focus_pane_left = ["prefix+h", "cmd+["]
+focus_pane_right = ["prefix+l", "cmd+]"]
+focus_pane_up = ["prefix+k", "cmd+alt+up"]
+focus_pane_down = ["prefix+j", "cmd+alt+down"]
+zoom = ["prefix+z", "cmd+shift+enter"]
+last_pane = "cmd+l"
+open_worktree = "cmd+alt+o"
+
+[[keys.command]]
+key = "cmd+w"
+type = "shell"
+command = "$HOME/.local/bin/herdr-pane-history close"
+description = "close pane and remember it"
+
+[[keys.command]]
+key = "cmd+shift+t"
+type = "shell"
+command = "$HOME/.local/bin/herdr-pane-history reopen"
+description = "reopen last closed pane"
+
+[[keys.command]]
+key = "cmd+shift+f"
+type = "plugin_action"
+command = "herdr-file-viewer.open-file-viewer"
+description = "open file viewer"
+
+[[keys.command]]
+key = "cmd+shift+o"
+type = "plugin_action"
+command = "worktrunk.open"
+description = "open or create a Worktrunk worktree"
+
+[[keys.command]]
+key = "cmd+shift+r"
+type = "plugin_action"
+command = "worktrunk.remove"
+description = "remove a Worktrunk worktree"
+
+[[keys.command]]
+key = "cmd+alt+l"
+type = "plugin_action"
+command = "local.layouts.layouts"
+description = "open Layouts"
+
+[[keys.command]]
+key = "cmd+alt+enter"
+type = "plugin_action"
+command = "local.layouts.expand"
+description = "expand the focused pane"
+
+[[keys.command]]
+key = "cmd+alt+b"
+type = "plugin_action"
+command = "local.layouts.balance"
+description = "balance the closest split"
+
+[[keys.command]]
+key = "cmd+alt+r"
+type = "plugin_action"
+command = "local.layouts.rotate"
+description = "rotate the closest split"
+
+[[keys.command]]
+key = "cmd+alt+z"
+type = "plugin_action"
+command = "local.layouts.undo"
+description = "undo the last layout change"
+
+[theme]
+name = "tokyo-night"
+auto_switch = false
+
+[ui.toast]
+delivery = "terminal"
+
+[ui]
+prompt_new_tab_name = false
+show_agent_labels_on_pane_borders = true
+pane_scrollbars = false
+pane_gaps = true
+status_indicators = "symbols"
+agent_panel_sort = "spaces"
+
+[ui.sidebar.agents]
+row_gap = 0
+rows = [
+  ["state_icon", "$pr", "state_text"],
+]
+
+[experimental]
+kitty_graphics = true

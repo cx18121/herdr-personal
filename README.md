@@ -1,63 +1,34 @@
+# herdr-personal
 
+Portable personal Herdr configuration, commands, and plugins for macOS and Linux.
 
-My personal Herdr plugins and pane history command
-
-## Tools and files
-
-- [`pane-history.mjs`](pane-history.mjs) adds close and reopen behavior for panes. It remembers the pane directory and tab, and it restores the previous Pi session when one is available.
-- [`install-worktrunk`](install-worktrunk) installs the current Worktrunk release through mise and owns the stable `~/.local/bin/wt` launcher.
-- [`pi-herdr-worktree-jump`](pi-herdr-worktree-jump) moves an active Pi session into a Worktrunk-managed checkout while preserving the conversation.
-- [`layouts/herdr-plugin.toml`](layouts/herdr-plugin.toml) registers the Arrange actions, shortcuts, and popup picker with Herdr.
-- [`layouts/src/main.rs`](layouts/src/main.rs) reads the requested Arrange action and runs it against the active Herdr pane.
-- [`layouts/src/herdr.rs`](layouts/src/herdr.rs) sends commands to the Herdr server and converts its layout responses into local Rust types.
-- [`layouts/src/layout.rs`](layouts/src/layout.rs) defines pane layout trees and the operations used to inspect or rearrange them.
-- [`layouts/src/operations.rs`](layouts/src/operations.rs) implements expand, balance, rotate, undo, pane rearranging, and the preset layouts.
-- [`layouts/src/picker.rs`](layouts/src/picker.rs) implements the keyboard and mouse interface for previewing and applying layout changes.
-- [`layouts/src/state.rs`](layouts/src/state.rs) stores one undo record for each tab in the Herdr plugin state directory.
-- [`layouts/src/error.rs`](layouts/src/error.rs) defines the errors shown by the Arrange command.
-- [`layouts/README.md`](layouts/README.md) explains the Arrange shortcuts, layouts, drag behavior, and keyboard controls.
-
-## Origins
-
-- [`pane-history.mjs`](pane-history.mjs) was built around Herdr's command line interface and agent session support.
-- [`layouts`](layouts/README.md) was built against Herdr's [plugin system](https://github.com/herdrdev/herdr/blob/master/docs/next/website/src/content/docs/plugins.mdx) and [socket layout API](https://github.com/herdrdev/herdr/blob/master/docs/next/website/src/content/docs/socket-api.mdx).
-
-## Build and link Arrange
+The top-level machine bootstrap in `cx18121/dotfiles` invokes this package. To apply it directly inside an already configured mise environment:
 
 ```bash
-cd ~/Projects/personal/herdr-personal/layouts
-cargo build --release
-herdr plugin link "$PWD"
+mise run bootstrap
+mise run check
 ```
 
-## Install the integrations
+## What it installs
 
-Worktree creation and removal use the upstream `devashish2203/herdr-worktrunk` plugin. Install Worktrunk and its stable launcher with:
+- `config/config.toml` as `~/.config/herdr/config.toml`
+- `cmd+w` pane close with history and `cmd+shift+t` reopen
+- A stable `~/.local/bin/wt` launcher for Worktrunk 0.77.0
+- Pinned GitHub plugins from `plugins.tsv`
+- The local Arrange plugin from `layouts/`
+- Worktrunk plugin settings
 
-```bash
-~/Projects/personal/herdr-personal/install-worktrunk
-```
+The portable plugin set contains GitHub PR status, automatic rename, file viewer, and Worktrunk. Collie remains machine-specific and is not installed by this package.
 
-Pi session relocation uses the local package:
+## Source layout
 
-```bash
-pi install ~/Projects/personal/herdr-personal/pi-herdr-worktree-jump
-```
+- `config/` contains the complete portable Herdr configuration.
+- `plugins.tsv` pins GitHub plugin sources and tags.
+- `pane-history.mjs` implements close and reopen behavior.
+- `bin/herdr-pane-history` gives Herdr a stable launcher whose Node runtime comes from mise.
+- `layouts/` contains the Arrange plugin and its Rust implementation.
+- `pi-herdr-worktree-jump/` contains Pi session relocation support.
+- `scripts/bootstrap` installs or updates the package idempotently.
+- `scripts/check` verifies the resulting runtime surface.
 
-## Configure pane history
-
-Add commands like these to `~/.config/herdr/config.toml`:
-
-```toml
-[[keys.command]]
-key = "cmd+w"
-type = "shell"
-command = "$HOME/Projects/personal/herdr-personal/pane-history.mjs close"
-description = "close pane and remember it"
-
-[[keys.command]]
-key = "cmd+shift+t"
-type = "shell"
-command = "$HOME/Projects/personal/herdr-personal/pane-history.mjs reopen"
-description = "reopen last closed pane"
-```
+Herdr runtime state, logs, sockets, sessions, pane history, credentials, and plugin state are not tracked.

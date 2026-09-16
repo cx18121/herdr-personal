@@ -1,0 +1,9 @@
+min_version = "2026.9.9"
+
+[tasks.bootstrap]
+description = "Install portable Herdr configuration, commands, and plugins"
+run = "./scripts/bootstrap"
+
+[tasks.check]
+description = "Verify the portable Herdr setup"
+run = "./scripts/check"

@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+config_dir="$HOME/.config/herdr"
+
+for command in herdr jq cargo node mise; do
+  if ! command -v "$command" >/dev/null 2>&1; then
+    printf 'Herdr setup requires %s on PATH.\n' "$command" >&2
+    exit 1
+  fi
+done
+
+mkdir -p "$config_dir/plugins/config/worktrunk" "$HOME/.local/bin"
+ln -sfn "$root/config/config.toml" "$config_dir/config.toml"
+ln -sfn "$root/config/plugins/worktrunk/config.toml" \
+  "$config_dir/plugins/config/worktrunk/config.toml"
+ln -sfn "$root/bin/herdr-pane-history" "$HOME/.local/bin/herdr-pane-history"
+for tool in bun gh herdr; do
+  ln -sfn "$root/bin/mise-tool" "$HOME/.local/bin/$tool"
+done
+
+worktrunk_version=0.77.0
+worktrunk_bin=$(mise which wt --tool "worktrunk@$worktrunk_version")
+cat > "$HOME/.local/bin/wt" <<SCRIPT
+#!/usr/bin/env bash
+set -euo pipefail
+exec "$worktrunk_bin" "\$@"
+SCRIPT
+chmod 0755 "$HOME/.local/bin/wt"
+
+plugins=$(herdr plugin list --json)
+while IFS=$'\t' read -r plugin_id source ref; do
+  [[ -n "$plugin_id" ]] || continue
+  if jq -e --arg id "$plugin_id" --arg ref "$ref" \
+    '.result.plugins[] | select(.plugin_id == $id and .source.requested_ref == $ref)' \
+    <<<"$plugins" >/dev/null; then
+    continue
+  fi
+  herdr plugin install "$source" --ref "$ref" --yes
+  plugins=$(herdr plugin list --json)
+done < "$root/plugins.tsv"
+
+mise exec -- cargo build --release --locked --manifest-path "$root/layouts/Cargo.toml"
+layouts_manifest="$root/layouts/herdr-plugin.toml"
+linked_manifest=$(jq -r \
+  '.result.plugins[] | select(.plugin_id == "local.layouts") | .manifest_path' \
+  <<<"$plugins")
+if [[ "$linked_manifest" != "$layouts_manifest" ]]; then
+  if [[ -n "$linked_manifest" ]]; then
+    herdr plugin unlink local.layouts
+  fi
+  herdr plugin link "$root/layouts"
+fi
+
+if herdr status server 2>/dev/null | grep -q '^status: running$'; then
+  herdr server reload-config
+fi
+
+mise -C "$root" run check
