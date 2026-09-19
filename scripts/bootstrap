@@ -16,9 +16,13 @@ ln -sfn "$root/config/config.toml" "$config_dir/config.toml"
 ln -sfn "$root/config/plugins/worktrunk/config.toml" \
   "$config_dir/plugins/config/worktrunk/config.toml"
 ln -sfn "$root/bin/herdr-pane-history" "$HOME/.local/bin/herdr-pane-history"
-for tool in bun gh herdr; do
+for tool in bun herdr; do
   ln -sfn "$root/bin/mise-tool" "$HOME/.local/bin/$tool"
 done
+
+# Mise's credential command calls gh, so gh must not re-enter mise.
+gh_bin=$(MISE_GITHUB_CREDENTIAL_COMMAND= mise -C "$root" --no-env --no-hooks which gh)
+ln -sfn "$gh_bin" "$HOME/.local/bin/gh"
 
 worktrunk_version=0.77.0
 worktrunk_bin=$(mise which wt --tool "worktrunk@$worktrunk_version")

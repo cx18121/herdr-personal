@@ -14,6 +14,7 @@ mise run check
 - `config/config.toml` as `~/.config/herdr/config.toml`
 - `cmd+w` pane close with history and `cmd+shift+t` reopen
 - A stable `~/.local/bin/wt` launcher for Worktrunk 0.77.0
+- A direct `~/.local/bin/gh` link to the installed GitHub CLI. Mise calls `gh` for credentials, so this launcher must not call Mise again. Rerun bootstrap after changing the global `gh` version.
 - Pinned GitHub plugins from `plugins.tsv`
 - The local Arrange plugin from `layouts/`
 - Worktrunk plugin settings

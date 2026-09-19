@@ -14,6 +14,12 @@ if [[ ! -L "$worktrunk_config" || "$(readlink "$worktrunk_config")" != "$root/co
   exit 1
 fi
 
+gh_bin=$(MISE_GITHUB_CREDENTIAL_COMMAND= mise -C "$root" --no-env --no-hooks which gh)
+if [[ ! -x "$HOME/.local/bin/gh" || "$(readlink "$HOME/.local/bin/gh")" != "$gh_bin" ]]; then
+  printf 'gh must link directly to its installed executable. Rerun bootstrap.\n' >&2
+  exit 1
+fi
+
 if [[ $(herdr --version) != "herdr 0.9.0" ]]; then
   printf 'Expected Herdr 0.9.0.\n' >&2
   exit 1
@@ -26,7 +32,7 @@ if [[ ! -x "$HOME/.local/bin/herdr-pane-history" ]]; then
   printf 'Missing herdr-pane-history launcher.\n' >&2
   exit 1
 fi
-for tool in bun gh herdr; do
+for tool in bun herdr; do
   launcher="$HOME/.local/bin/$tool"
   if [[ ! -L "$launcher" || "$(readlink "$launcher")" != "$root/bin/mise-tool" ]]; then
     printf 'Missing Herdr runtime launcher: %s.\n' "$tool" >&2
