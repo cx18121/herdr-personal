@@ -1,7 +1,7 @@
-import { defineTool, SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { defineTool, getAgentDir, SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 
@@ -75,6 +75,7 @@ type JumpOptions = {
 	branch?: string;
 	base?: string;
 	label?: string;
+	handoff?: string;
 };
 
 type JumpTarget = {
@@ -114,7 +115,7 @@ export function createJumpTool(pi: CommandRunner) {
 		promptSnippet: "Jump this Pi session to a new worktree or back to the main checkout only when explicitly requested",
 		promptGuidelines: [
 			"Use herdr_worktree_jump only when the user explicitly asks to jump or move this Pi session into a new worktree or back to the repository's main checkout.",
-			"Before herdr_worktree_jump creates a worktree without an explicit base, remind the user that Worktrunk uses the local default branch and that they should keep it current with its upstream.",
+			"Pass herdr_worktree_jump a handoff when this session is long or holds earlier unrelated work: the next action and its check, the goal and acceptance check, current state, settled and rejected decisions with reasons, in 500 to 800 words. The new session then starts from the handoff instead of this session's full history.",
 			"Never use herdr_worktree_jump merely because isolation would be useful, repository instructions recommend a worktree, or the task appears non-trivial.",
 		],
 		parameters: Type.Object({
@@ -131,12 +132,17 @@ export function createJumpTool(pi: CommandRunner) {
 			base: Type.Optional(
 				Type.String({
 					description:
-						"Git ref used as the new branch base for destination=new. If omitted, Worktrunk uses the repository's local default branch.",
+						"Git ref used as the new branch base for destination=new. If omitted, the tool fetches origin and branches from its default branch.",
 				}),
 			),
 			label: Type.Optional(
 				Type.String({
 					description: "Optional Herdr workspace label for destination=new.",
+				}),
+			),
+			handoff: Type.Optional(
+				Type.String({
+					description: "Markdown handoff that starts the new session in place of this session's history. This session is kept so the new one can query it.",
 				}),
 			),
 		}),
@@ -146,6 +152,7 @@ export function createJumpTool(pi: CommandRunner) {
 				branch: cleanOptional(params.branch),
 				base: cleanOptional(params.base),
 				label: cleanOptional(params.label),
+				handoff: cleanOptional(params.handoff),
 			});
 		},
 	});
@@ -191,13 +198,22 @@ export async function executeJump(
 		}
 		const worktreePath = await canonicalDirectory(target.worktreePath);
 
-		newSessionFile = await forkSessionFile(currentFile, worktreePath, forkFrom);
-		await runInNewPane(pi, signal, target.rootPaneId, newSessionFile, worktreePath);
+		let continuation: string[];
+		if (options.handoff) {
+			const handoffFile = await writeHandoff(options.handoff, currentFile, worktreePath);
+			continuation = [
+				`Moved to worktree ${worktreePath}. Read the handoff at ${handoffFile}, restate the goal and next step in two lines, then continue.`,
+			];
+		} else {
+			newSessionFile = await forkSessionFile(currentFile, worktreePath, forkFrom);
+			continuation = ["--session", newSessionFile, `Moved to worktree ${worktreePath}. Continue.`];
+		}
+		await runInNewPane(pi, signal, target.rootPaneId, continuation, worktreePath);
 		replacementStarted = true;
 
 		let cleanupWarning: string | undefined;
 		try {
-			await scheduleOldPaneCleanup(pi, currentFile, oldPaneId, process.pid);
+			await scheduleOldPaneCleanup(pi, options.handoff ? undefined : currentFile, oldPaneId, process.pid);
 		} catch (error) {
 			cleanupWarning = error instanceof Error ? error.message : String(error);
 		}
@@ -274,8 +290,9 @@ async function createWorktree(
 	options: JumpOptions,
 ): Promise<JumpTarget> {
 	const branch = options.branch ?? generateBranchName();
+	const base = options.base ?? (await fetchRemoteDefault(pi, signal, sourceCheckout));
 	const switchArgs = ["switch", "--create", branch, "--no-cd", "--format=json"];
-	if (options.base) switchArgs.push("--base", options.base);
+	if (base) switchArgs.push("--base", base);
 
 	let switched: Static<typeof WorktrunkSwitchSchema>;
 	try {
@@ -385,31 +402,69 @@ async function openMainCheckout(
 	};
 }
 
+/** A local default branch goes stale, so new worktrees start from the fetched remote one. */
+async function fetchRemoteDefault(
+	pi: CommandRunner,
+	signal: AbortSignal | undefined,
+	sourceCheckout: string,
+): Promise<string | undefined> {
+	try {
+		const head = await pi.exec("git", ["-C", sourceCheckout, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], {
+			cwd: sourceCheckout, signal, timeout: 5_000,
+		});
+		const remoteBranch = head.code === 0 ? head.stdout.trim() : "";
+		if (!remoteBranch.startsWith("origin/")) return undefined;
+		const localBranch = remoteBranch.slice("origin/".length);
+		const fetched = await pi.exec("git", ["-C", sourceCheckout, "fetch", "--quiet", "origin", localBranch], {
+			cwd: sourceCheckout, signal, timeout: 60_000,
+		});
+		// Offline, the remote ref may be staler than the local branch.
+		if (fetched.code !== 0) return undefined;
+		// Keep local commits that were never pushed.
+		const unpushed = await pi.exec("git", ["-C", sourceCheckout, "rev-list", "--count", `${remoteBranch}..${localBranch}`], {
+			cwd: sourceCheckout, signal, timeout: 5_000,
+		});
+		if (unpushed.code === 0 && Number(unpushed.stdout.trim()) > 0) return undefined;
+		return remoteBranch;
+	} catch {
+		return undefined;
+	}
+}
+
+async function writeHandoff(handoff: string, previousSession: string, worktreePath: string): Promise<string> {
+	const directory = join(getAgentDir(), "handoffs");
+	await mkdir(directory, { recursive: true });
+	const file = join(directory, `${new Date().toISOString().replace(/[:.]/g, "-")}.md`);
+	const footer = `\n\n---\nPrevious session: ${previousSession}. Use session_query on it for details this handoff omits. Working directory: ${worktreePath}.\n`;
+	await writeFile(file, `${handoff.trim()}${footer}`, "utf8");
+	return file;
+}
+
 async function runInNewPane(
 	pi: CommandRunner,
 	signal: AbortSignal | undefined,
 	paneId: string,
-	sessionFile: string,
+	piArgs: string[],
 	worktreePath: string,
 ): Promise<void> {
-	const continuation = `Moved to worktree ${worktreePath}. Continue.`;
-	const command = ["pi", "--session", sessionFile, continuation].map(shellQuote).join(" ");
+	const command = ["pi", ...piArgs].map(shellQuote).join(" ");
 	await herdr(pi, ["pane", "run", paneId, command], signal, worktreePath, 10_000);
 }
 
+/** The forked copy replaces the old session file. A handoff keeps it for session_query. */
 async function scheduleOldPaneCleanup(
 	pi: CommandRunner,
-	oldSessionFile: string,
+	oldSessionFile: string | undefined,
 	oldPaneId: string,
 	oldPid: number,
 ): Promise<void> {
 	const cleanup = [
 		`old_pid=${oldPid}`,
-		`old_session=${shellQuote(oldSessionFile)}`,
 		`old_pane=${shellQuote(oldPaneId)}`,
 		"i=0",
 		"while kill -0 \"$old_pid\" 2>/dev/null && [ \"$i\" -lt 600 ]; do i=$((i + 1)); sleep 0.1; done",
-		"rm -f -- \"$old_session\"",
+		// After the 60 s wait, a still-running old Pi may yet write its session file. Keep it.
+		...(oldSessionFile ? [`kill -0 "$old_pid" 2>/dev/null || rm -f -- ${shellQuote(oldSessionFile)}`] : []),
 		"herdr pane close \"$old_pane\" >/dev/null 2>&1 || true",
 	].join("; ");
 

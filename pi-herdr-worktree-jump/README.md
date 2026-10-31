@@ -8,12 +8,12 @@ For a new destination, the tool:
 
 1. Resolves the repository's source checkout through Herdr.
 2. Creates the branch and checkout with `wt switch --create`, including Worktrunk lifecycle hooks.
-3. Uses Worktrunk's local default branch when no base is supplied. Keep that branch current with its upstream before jumping.
+3. When no base is supplied, fetches `origin` and branches from its default branch, such as `origin/main`. It uses Worktrunk's local default branch instead when there is no `origin` default, the fetch fails, or the local branch has unpushed commits.
 4. Opens the checkout as a Herdr worktree workspace.
-5. Forks the persisted Pi session into the checkout and starts it in the new pane.
+5. Forks the persisted Pi session into the checkout and starts it in the new pane. With a `handoff`, it instead writes the handoff to `~/.pi/agent/handoffs/`, starts a fresh session from it, and keeps the old session file so the new agent can query it.
 6. Shuts down the old Pi process and closes its pane.
 
-An explicit `base` overrides Worktrunk's local default branch. Returning to the main checkout continues to use Herdr directly because it creates no checkout.
+An explicit `base` overrides the fetched default. Returning to the main checkout continues to use Herdr directly because it creates no checkout.
 
 Worktrunk project hooks must be approved before a non-interactive Pi jump. Run `wt config approvals add` from the repository when its hook commands are new or changed.
 

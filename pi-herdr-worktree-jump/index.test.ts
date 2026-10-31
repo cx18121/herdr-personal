@@ -38,13 +38,12 @@ afterEach(async () => {
 });
 
 describe("pi-herdr-worktree-jump", () => {
-	test("describes the Worktrunk lifecycle and local default branch", () => {
+	test("describes the Worktrunk lifecycle and handoff", () => {
 		const tool = createJumpTool({ exec: async () => success() });
 
 		expect(tool.description).toContain("Worktrunk creates and initializes");
 		expect(tool.promptGuidelines?.join("\n")).toContain("only when the user explicitly asks");
-		expect(tool.promptGuidelines?.join("\n")).toContain("remind the user");
-		expect(tool.promptGuidelines?.join("\n")).toContain("keep it current with its upstream");
+		expect(tool.promptGuidelines?.join("\n")).toContain("handoff");
 	});
 
 	test("creates through Worktrunk, opens through Herdr, and starts the replacement Pi", async () => {
@@ -67,6 +66,9 @@ describe("pi-herdr-worktree-jump", () => {
 		const exec: Exec = async (command, args, options) => {
 			calls.push({ command, args, options });
 			if (command === "sh") return success();
+			if (command === "git" && args.includes("symbolic-ref")) return success("origin/main\n");
+			if (command === "git" && args.includes("fetch")) return success();
+			if (command === "git" && args.includes("rev-list")) return success("0\n");
 			if (command === "wt") {
 				return success(JSON.stringify({ action: "created", path: worktreePath, branch: "issue/2325-jump" }));
 			}
@@ -115,12 +117,13 @@ describe("pi-herdr-worktree-jump", () => {
 			args: ["worktree", "list", "--cwd", sourceSubdirectory],
 			options: { cwd: sourceSubdirectory, timeout: 10_000 },
 		});
-		expect(calls[1]).toMatchObject({
+		expect(calls[2]?.args).toEqual(["-C", canonicalSource, "fetch", "--quiet", "origin", "main"]);
+		expect(calls[4]).toMatchObject({
 			command: "wt",
-			args: ["switch", "--create", "issue/2325-jump", "--no-cd", "--format=json"],
+			args: ["switch", "--create", "issue/2325-jump", "--no-cd", "--format=json", "--base", "origin/main"],
 			options: { cwd: canonicalSource, timeout: 600_000 },
 		});
-		expect(calls[2]).toMatchObject({
+		expect(calls[5]).toMatchObject({
 			command: "herdr",
 			args: [
 				"worktree",
@@ -140,6 +143,8 @@ describe("pi-herdr-worktree-jump", () => {
 
 		const header = JSON.parse((await readFile(newSession, "utf8")).split("\n")[0]);
 		expect(header.parentSession).toBeUndefined();
+		const cleanup = calls.find((call) => call.command === "sh")!.args[1]!;
+		expect(cleanup).toContain(`kill -0 "$old_pid" 2>/dev/null || rm -f -- `);
 		expect(statuses.at(-1)).toEqual(["herdr-worktree-jump", undefined]);
 		expect(notifications.at(-1)).toContain(worktreePath);
 		expect(shutdown).toBe(true);
@@ -374,4 +379,50 @@ describe("pi-herdr-worktree-jump", () => {
 			),
 		).rejects.toThrow("not persisted");
 	});
+
+	test("a handoff starts a fresh session and keeps the old one for reference", async () => {
+		const sourceCheckout = `${testRoot}/source`;
+		const worktreePath = `${testRoot}/worktree`;
+		const currentSession = `${testRoot}/current.jsonl`;
+		await mkdir(sourceCheckout, { recursive: true });
+		await mkdir(worktreePath, { recursive: true });
+		await writeFile(currentSession, '{"type":"session","cwd":"source"}\n');
+		process.env.PI_CODING_AGENT_DIR = `${testRoot}/agent`;
+
+		const calls: Call[] = [];
+		const exec: Exec = async (command, args, options) => {
+			calls.push({ command, args, options });
+			if (command === "sh" || command === "git") return success();
+			if (command === "wt") return success(JSON.stringify({ path: worktreePath, branch: "fix/x" }));
+			if (args[0] === "worktree" && args[1] === "list") return json({ source: { source_checkout_path: sourceCheckout } });
+			if (args[0] === "worktree" && args[1] === "open") {
+				return json({ workspace: { workspace_id: "w2" }, root_pane: { pane_id: "w2:p1" }, worktree: { path: worktreePath, branch: "fix/x" } });
+			}
+			if (args[0] === "pane") return success();
+			throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+		};
+		let forked = false;
+		try {
+			await executeJump(
+				{ exec },
+				{ cwd: sourceCheckout, sessionManager: { getSessionFile: () => currentSession }, ui: { setStatus() {}, notify() {} }, shutdown() {} },
+				undefined,
+				() => { forked = true; return { getSessionFile: () => undefined }; },
+				{ destination: "new", branch: "fix/x", handoff: "## Goal\nShip the fix." },
+			);
+		} finally {
+			delete process.env.PI_CODING_AGENT_DIR;
+		}
+
+		expect(forked).toBe(false);
+		const command = calls.find((call) => call.args[0] === "pane")!.args[3]!;
+		expect(command).not.toContain("--session");
+		const handoffFile = command.match(/handoff at (\S+\.md)/)![1]!;
+		const handoff = await readFile(handoffFile, "utf8");
+		expect(handoff).toContain("Ship the fix.");
+		expect(handoff).toContain(currentSession);
+		const cleanup = calls.find((call) => call.command === "sh")!.args[1]!;
+		expect(cleanup).not.toContain("rm -f");
+	});
 });
+
