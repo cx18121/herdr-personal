@@ -16,7 +16,7 @@ ln -sfn "$root/config/config.toml" "$config_dir/config.toml"
 ln -sfn "$root/config/plugins/worktrunk/config.toml" \
   "$config_dir/plugins/config/worktrunk/config.toml"
 ln -sfn "$root/bin/herdr-pane-history" "$HOME/.local/bin/herdr-pane-history"
-for tool in bun herdr; do
+for tool in bun herdr wt; do
   ln -sfn "$root/bin/mise-tool" "$HOME/.local/bin/$tool"
 done
 
@@ -24,14 +24,6 @@ done
 gh_bin=$(MISE_GITHUB_CREDENTIAL_COMMAND= mise -C "$root" --no-env --no-hooks which gh)
 ln -sfn "$gh_bin" "$HOME/.local/bin/gh"
 
-worktrunk_version=0.77.0
-worktrunk_bin=$(mise which wt --tool "worktrunk@$worktrunk_version")
-cat > "$HOME/.local/bin/wt" <<SCRIPT
-#!/usr/bin/env bash
-set -euo pipefail
-exec "$worktrunk_bin" "\$@"
-SCRIPT
-chmod 0755 "$HOME/.local/bin/wt"
 
 plugins=$(herdr plugin list --json)
 while IFS=$'\t' read -r plugin_id source ref; do
