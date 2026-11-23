@@ -111,12 +111,11 @@ export function createJumpTool(pi: CommandRunner) {
 		name: "herdr_worktree_jump",
 		label: "Herdr Worktree Jump",
 		description:
-			"Relocate this Pi session either into a new Worktrunk-managed linked Git worktree or back to the repository's main checkout. Worktrunk creates and initializes the checkout before Herdr opens the destination workspace. The replacement Pi starts in a dedicated Herdr pane, then the old Pi shuts down and its pane closes. This is an explicit session relocation, not a general isolation or worktree-planning tool.",
-		promptSnippet: "Jump this Pi session to a new worktree or back to the main checkout only when explicitly requested",
+			"Relocate this Pi session to a new Worktrunk-managed linked Git worktree or back to the main checkout. Worktrunk creates and initializes the checkout before Herdr opens the destination workspace, starts the replacement Pi, and closes the old pane.",
+		promptSnippet: "Relocate this Pi session to a new worktree or main checkout when explicitly requested",
 		promptGuidelines: [
-			"Use herdr_worktree_jump only when the user explicitly asks to jump or move this Pi session into a new worktree or back to the repository's main checkout.",
-			"Pass herdr_worktree_jump a handoff when this session is long or holds earlier unrelated work: the next action and its check, the goal and acceptance check, current state, settled and rejected decisions with reasons, in 500 to 800 words. The new session then starts from the handoff instead of this session's full history.",
-			"Never use herdr_worktree_jump merely because isolation would be useful, repository instructions recommend a worktree, or the task appears non-trivial.",
+			"Use herdr_worktree_jump only when the user explicitly asks to move this Pi session to a worktree or main checkout, never merely because isolation would help.",
+			"Pass a 500 to 800 word handoff when this session is long or holds unrelated work so the new session starts clean while keeping the old session queryable.",
 		],
 		parameters: Type.Object({
 			destination: Type.Optional(
