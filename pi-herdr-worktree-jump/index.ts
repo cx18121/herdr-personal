@@ -1,6 +1,7 @@
 import { defineTool, getAgentDir, SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
@@ -68,10 +69,11 @@ const SessionHeaderSchema = Type.Object(
 	{ additionalProperties: true },
 );
 
-type JumpDestination = "new" | "main";
+type JumpDestination = "new" | "existing" | "main";
 
 type JumpOptions = {
 	destination: JumpDestination;
+	path?: string;
 	branch?: string;
 	base?: string;
 	label?: string;
@@ -111,16 +113,22 @@ export function createJumpTool(pi: CommandRunner) {
 		name: "herdr_worktree_jump",
 		label: "Herdr Worktree Jump",
 		description:
-			"Relocate this Pi session to a new Worktrunk-managed linked Git worktree or back to the main checkout. Worktrunk creates and initializes the checkout before Herdr opens the destination workspace, starts the replacement Pi, and closes the old pane.",
-		promptSnippet: "Relocate this Pi session to a new worktree or main checkout when explicitly requested",
+			"Relocate this Pi session to a new Worktrunk-managed linked Git worktree, an existing Git worktree, or back to the main checkout. For new worktrees, Worktrunk creates and initializes the checkout before Herdr opens the destination workspace, starts the replacement Pi, and closes the old pane.",
+		promptSnippet: "Relocate this Pi session to a new, existing, or main worktree in Herdr when explicitly requested",
 		promptGuidelines: [
-			"Use herdr_worktree_jump only when the user explicitly asks to move this Pi session to a worktree or main checkout, never merely because isolation would help.",
+			"Use herdr_worktree_jump only when the user explicitly asks to move this Pi session to a worktree or main checkout in Herdr, never merely because isolation would help.",
 			"Pass a 500 to 800 word handoff when this session is long or holds unrelated work so the new session starts clean while keeping the old session queryable.",
 		],
 		parameters: Type.Object({
 			destination: Type.Optional(
-				StringEnum(["new", "main"] as const, {
-					description: "Use new to create a worktree, or main to return to the repository's main checkout. Defaults to new.",
+				StringEnum(["new", "existing", "main"] as const, {
+					description:
+						"Use new to create a worktree, existing to open an already-existing worktree at path, or main to return to the repository's main checkout. Defaults to existing when path is set, otherwise new.",
+				}),
+			),
+			path: Type.Optional(
+				Type.String({
+					description: "Path to an existing Git worktree for destination=existing.",
 				}),
 			),
 			branch: Type.Optional(
@@ -136,7 +144,7 @@ export function createJumpTool(pi: CommandRunner) {
 			),
 			label: Type.Optional(
 				Type.String({
-					description: "Optional Herdr workspace label for destination=new.",
+					description: "Optional Herdr workspace label for destination=new or destination=existing.",
 				}),
 			),
 			handoff: Type.Optional(
@@ -146,8 +154,10 @@ export function createJumpTool(pi: CommandRunner) {
 			),
 		}),
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const targetPath = cleanOptional(params.path);
 			return executeJump(pi, ctx, signal, SessionManager.forkFrom, {
-				destination: params.destination ?? "new",
+				destination: params.destination ?? (targetPath ? "existing" : "new"),
+				path: targetPath,
 				branch: cleanOptional(params.branch),
 				base: cleanOptional(params.base),
 				label: cleanOptional(params.label),
@@ -176,24 +186,45 @@ export async function executeJump(
 	if (options.destination === "main" && (options.branch || options.base || options.label)) {
 		throw new Error("branch, base, and label apply only when destination is new");
 	}
+	if (options.destination === "existing") {
+		if (!options.path) {
+			throw new Error("path is required when destination is existing");
+		}
+		if (options.branch || options.base) {
+			throw new Error("branch and base apply only when destination is new");
+		}
+	} else if (options.path) {
+		throw new Error("path applies only when destination is existing");
+	}
 
 	ctx.ui.setStatus("herdr-worktree-jump", "resolving repository");
 	let newSessionFile: string | undefined;
 	let replacementStarted = false;
 
 	try {
-		const sourceCheckout = await resolveSourceCheckout(pi, signal, ctx.cwd);
 		let target: JumpTarget;
-		if (options.destination === "main") {
+		if (options.destination === "existing") {
+			const existingPath = await canonicalDirectory(options.path!, ctx.cwd);
 			const currentDirectory = await canonicalDirectory(ctx.cwd);
-			if (isWithinDirectory(sourceCheckout, currentDirectory)) {
-				throw new Error(`Pi is already inside the main checkout: ${sourceCheckout}`);
+			if (isWithinDirectory(existingPath, currentDirectory)) {
+				throw new Error(`Pi is already inside the target worktree: ${existingPath}`);
 			}
-			ctx.ui.setStatus("herdr-worktree-jump", "opening main checkout");
-			target = await openMainCheckout(pi, signal, sourceCheckout);
+			const sourceCheckout = await resolveSourceCheckout(pi, signal, existingPath);
+			ctx.ui.setStatus("herdr-worktree-jump", "opening worktree");
+			target = await openExistingWorktree(pi, signal, sourceCheckout, existingPath, options.label);
 		} else {
-			ctx.ui.setStatus("herdr-worktree-jump", "creating worktree");
-			target = await createWorktree(pi, signal, sourceCheckout, options);
+			const sourceCheckout = await resolveSourceCheckout(pi, signal, ctx.cwd);
+			if (options.destination === "main") {
+				const currentDirectory = await canonicalDirectory(ctx.cwd);
+				if (isWithinDirectory(sourceCheckout, currentDirectory)) {
+					throw new Error(`Pi is already inside the main checkout: ${sourceCheckout}`);
+				}
+				ctx.ui.setStatus("herdr-worktree-jump", "opening main checkout");
+				target = await openExistingWorktree(pi, signal, sourceCheckout, sourceCheckout);
+			} else {
+				ctx.ui.setStatus("herdr-worktree-jump", "creating worktree");
+				target = await createWorktree(pi, signal, sourceCheckout, options);
+			}
 		}
 		const worktreePath = await canonicalDirectory(target.worktreePath);
 
@@ -346,14 +377,20 @@ async function createWorktree(
 	};
 }
 
-async function openMainCheckout(
+async function openExistingWorktree(
 	pi: CommandRunner,
 	signal: AbortSignal | undefined,
 	sourceCheckout: string,
+	targetPath: string,
+	label?: string,
 ): Promise<JumpTarget> {
+	const openArgs = ["worktree", "open", "--cwd", sourceCheckout, "--path", targetPath];
+	if (label) openArgs.push("--label", label);
+	openArgs.push("--focus");
+
 	const opened = await herdrResult(
 		pi,
-		["worktree", "open", "--cwd", sourceCheckout, "--path", sourceCheckout, "--focus"],
+		openArgs,
 		WorktreeOpenedSchema,
 		signal,
 		sourceCheckout,
@@ -364,10 +401,11 @@ async function openMainCheckout(
 		throw new Error("Herdr worktree open response did not include workspace.workspace_id");
 	}
 
+	const worktreePath = opened?.worktree?.path ? await canonicalDirectory(opened.worktree.path) : targetPath;
 	if (opened?.already_open) {
 		const tab = await herdrResult(
 			pi,
-			["tab", "create", "--workspace", workspaceId, "--cwd", sourceCheckout, "--focus"],
+			["tab", "create", "--workspace", workspaceId, "--cwd", worktreePath, "--focus"],
 			TabCreatedSchema,
 			signal,
 			sourceCheckout,
@@ -379,7 +417,7 @@ async function openMainCheckout(
 			throw new Error("Herdr tab create response did not include tab.tab_id and root_pane.pane_id");
 		}
 		return {
-			worktreePath: sourceCheckout,
+			worktreePath,
 			rootPaneId,
 			branch: opened.worktree?.branch,
 			workspaceId,
@@ -387,7 +425,6 @@ async function openMainCheckout(
 		};
 	}
 
-	const worktreePath = opened?.worktree?.path ?? sourceCheckout;
 	const rootPaneId = opened?.root_pane?.pane_id;
 	if (!rootPaneId) {
 		throw new Error("Herdr worktree open response did not include root_pane.pane_id");
@@ -505,8 +542,15 @@ async function forkSessionFile(
 	return newFile;
 }
 
-async function canonicalDirectory(path: string): Promise<string> {
-	const resolved = resolve(path.replace(/^@/, ""));
+async function canonicalDirectory(path: string, baseDir?: string): Promise<string> {
+	const cleaned = path.trim().replace(/^@/, "");
+	const expanded =
+		cleaned === "~"
+			? homedir()
+			: cleaned.startsWith("~/") || cleaned.startsWith("~\\")
+				? join(homedir(), cleaned.slice(2))
+				: cleaned;
+	const resolved = baseDir ? resolve(baseDir, expanded) : resolve(expanded);
 	const info = await stat(resolved).catch(() => undefined);
 	if (!info?.isDirectory()) {
 		throw new Error(`Directory does not exist: ${resolved}`);

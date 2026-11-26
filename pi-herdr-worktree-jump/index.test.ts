@@ -424,5 +424,168 @@ describe("pi-herdr-worktree-jump", () => {
 		const cleanup = calls.find((call) => call.command === "sh")!.args[1]!;
 		expect(cleanup).not.toContain("rm -f");
 	});
+
+	test("jumps to an existing worktree path without invoking Worktrunk", async () => {
+		const sourceCheckout = `${testRoot}/source`;
+		const existingWorktree = `${testRoot}/worktrees/existing-fix`;
+		const otherDir = `${testRoot}/unrelated`;
+		const currentSession = `${testRoot}/current.jsonl`;
+		const newSession = `${testRoot}/new.jsonl`;
+		await mkdir(sourceCheckout, { recursive: true });
+		await mkdir(existingWorktree, { recursive: true });
+		await mkdir(otherDir, { recursive: true });
+		const canonicalSource = await realpath(sourceCheckout);
+		const canonicalExisting = await realpath(existingWorktree);
+		await writeFile(currentSession, '{"type":"session","cwd":"unrelated"}\n');
+		await writeFile(newSession, '{"type":"session","cwd":"existing"}\n');
+
+		const calls: Call[] = [];
+		const exec: Exec = async (command, args, options) => {
+			calls.push({ command, args, options });
+			if (command === "sh") return success();
+			if (args[0] === "worktree" && args[1] === "list") {
+				return json({ source: { source_checkout_path: sourceCheckout } });
+			}
+			if (args[0] === "worktree" && args[1] === "open") {
+				return json({
+					workspace: { workspace_id: "w-existing" },
+					tab: { tab_id: "w-existing:t1" },
+					root_pane: { pane_id: "w-existing:p1" },
+					worktree: { path: existingWorktree, branch: "fix/existing" },
+				});
+			}
+			if (args[0] === "pane") return success();
+			throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+		};
+
+		const result = await executeJump(
+			{ exec },
+			{
+				cwd: otherDir,
+				sessionManager: { getSessionFile: () => currentSession },
+				ui: { setStatus() {}, notify() {} },
+				shutdown() {},
+			},
+			undefined,
+			() => ({ getSessionFile: () => newSession }),
+			{ destination: "existing", path: "../worktrees/existing-fix", label: "existing fix" },
+		);
+
+		expect(calls.some((call) => call.command === "wt")).toBe(false);
+		expect(calls[0]).toMatchObject({
+			command: "herdr",
+			args: ["worktree", "list", "--cwd", canonicalExisting],
+		});
+		expect(calls[1]?.args).toEqual([
+			"worktree",
+			"open",
+			"--cwd",
+			canonicalSource,
+			"--path",
+			canonicalExisting,
+			"--label",
+			"existing fix",
+			"--focus",
+		]);
+		expect(result.details).toMatchObject({
+			destination: "existing",
+			worktreePath: canonicalExisting,
+			branch: "fix/existing",
+			workspaceId: "w-existing",
+			paneId: "w-existing:p1",
+		});
+	});
+
+	test("opens a new tab when jumping to an existing worktree whose Herdr workspace is already open", async () => {
+		const sourceCheckout = `${testRoot}/source`;
+		const existingWorktree = `${testRoot}/worktrees/already-open`;
+		const currentSession = `${testRoot}/current.jsonl`;
+		const newSession = `${testRoot}/new.jsonl`;
+		await mkdir(sourceCheckout, { recursive: true });
+		await mkdir(existingWorktree, { recursive: true });
+		const canonicalExisting = await realpath(existingWorktree);
+		await writeFile(currentSession, '{"type":"session","cwd":"source"}\n');
+		await writeFile(newSession, '{"type":"session","cwd":"existing"}\n');
+
+		const calls: Call[] = [];
+		const exec: Exec = async (command, args, options) => {
+			calls.push({ command, args, options });
+			if (command === "sh") return success();
+			if (args[0] === "worktree" && args[1] === "list") {
+				return json({ source: { source_checkout_path: sourceCheckout } });
+			}
+			if (args[0] === "worktree" && args[1] === "open") {
+				return json({
+					workspace: { workspace_id: "w-open" },
+					root_pane: { pane_id: "w-open:p-busy" },
+					worktree: { path: existingWorktree, branch: "feat/open" },
+					already_open: true,
+				});
+			}
+			if (args[0] === "tab" && args[1] === "create") {
+				return json({ tab: { tab_id: "w-open:t2" }, root_pane: { pane_id: "w-open:p2" } });
+			}
+			if (args[0] === "pane") return success();
+			throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+		};
+
+		const result = await executeJump(
+			{ exec },
+			{
+				cwd: sourceCheckout,
+				sessionManager: { getSessionFile: () => currentSession },
+				ui: { setStatus() {}, notify() {} },
+				shutdown() {},
+			},
+			undefined,
+			() => ({ getSessionFile: () => newSession }),
+			{ destination: "existing", path: existingWorktree },
+		);
+
+		expect(calls[2]?.args).toEqual([
+			"tab",
+			"create",
+			"--workspace",
+			"w-open",
+			"--cwd",
+			canonicalExisting,
+			"--focus",
+		]);
+		expect(result.details).toMatchObject({
+			workspaceId: "w-open",
+			tabId: "w-open:t2",
+			paneId: "w-open:p2",
+		});
+	});
+
+	test("validates destination=existing arguments and rejects jumping into the current worktree", async () => {
+		const worktree = `${testRoot}/worktree`;
+		const sub = `${worktree}/nested`;
+		const currentSession = `${testRoot}/current.jsonl`;
+		await mkdir(sub, { recursive: true });
+		await writeFile(currentSession, '{"type":"session","cwd":"worktree"}\n');
+
+		const ctx = {
+			cwd: sub,
+			sessionManager: { getSessionFile: () => currentSession },
+			ui: { setStatus() {}, notify() {} },
+			shutdown() {},
+		};
+		const noop = { exec: async () => success() };
+		const noFork = () => ({ getSessionFile: () => undefined });
+
+		await expect(executeJump(noop, ctx, undefined, noFork, { destination: "existing" })).rejects.toThrow(
+			"path is required",
+		);
+		await expect(
+			executeJump(noop, ctx, undefined, noFork, { destination: "existing", path: worktree, branch: "x" }),
+		).rejects.toThrow("branch and base apply only when destination is new");
+		await expect(
+			executeJump(noop, ctx, undefined, noFork, { destination: "new", path: worktree }),
+		).rejects.toThrow("path applies only when destination is existing");
+		await expect(
+			executeJump(noop, ctx, undefined, noFork, { destination: "existing", path: worktree }),
+		).rejects.toThrow("already inside the target worktree");
+	});
 });
 

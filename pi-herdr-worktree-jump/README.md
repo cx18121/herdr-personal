@@ -13,7 +13,7 @@ For a new destination, the tool:
 5. Forks the persisted Pi session into the checkout and starts it in the new pane. With a `handoff`, it instead writes the handoff to `~/.pi/agent/handoffs/`, starts a fresh session from it, and keeps the old session file so the new agent can query it.
 6. Shuts down the old Pi process and closes its pane.
 
-An explicit `base` overrides the fetched default. Returning to the main checkout continues to use Herdr directly because it creates no checkout.
+An explicit `base` overrides the fetched default. Jumping to an existing worktree (`destination: "existing"` with `path`) or returning to the main checkout (`destination: "main"`) uses Herdr directly without invoking Worktrunk, opening a new tab when that workspace is already open.
 
 Worktrunk project hooks must be approved before a non-interactive Pi jump. Run `wt config approvals add` from the repository when its hook commands are new or changed.
 
